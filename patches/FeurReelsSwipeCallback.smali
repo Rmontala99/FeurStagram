@@ -205,9 +205,27 @@
     :have_idx
     new-instance v3, Lcom/feurstagram/FeurReelsSwipeCallback;
     invoke-direct {v3, v1, v2}, Lcom/feurstagram/FeurReelsSwipeCallback;-><init>(Landroidx/viewpager2/widget/ViewPager2;I)V
+
+    # The A08 obfuscated name is re-derived per Instagram build and can be
+    # wrong even when the version number matches (different arch/minAPI
+    # splits of the "same" version can land on a different R8 mapping).
+    # If the call doesn't resolve, skip the swipe-bounce enhancement
+    # instead of crashing the whole app — clips_tab hiding above already
+    # covers the main Reels block.
+    :try_start_0
     invoke-virtual {v1, v3}, Landroidx/viewpager2/widget/ViewPager2;->A08(LX/02Gi;)V
+    :try_end_0
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :catch_0
 
     const-string v0, "FeurReelsSwipeCallback installed"
+    invoke-static {v0}, Lcom/feurstagram/FeurHooks;->log(Ljava/lang/String;)V
+
+    const/4 v0, 0x1
+    return v0
+
+    :catch_0
+    move-exception v0
+    const-string v0, "FeurReelsSwipeCallback unsupported on this build, skipping"
     invoke-static {v0}, Lcom/feurstagram/FeurHooks;->log(Ljava/lang/String;)V
 
     const/4 v0, 0x1
