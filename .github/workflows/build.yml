@@ -97,8 +97,9 @@ jobs:
                  "$URL" -o instagram.apk
           fi
 
-          # Verificar que es un APK real (ZIP que empieza con PK)
-          if ! file instagram.apk | grep -qiE "zip|java"; then
+          # Verificar que es un APK real (ZIP que empieza con PK, o detectado
+          # directamente como APK por libmagic en runners más nuevos)
+          if ! file instagram.apk | grep -qiE "zip|java|android package|apk"; then
             echo "❌ El archivo descargado no parece un APK válido:"
             file instagram.apk
             exit 1
