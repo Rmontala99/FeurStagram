@@ -69,8 +69,10 @@ jobs:
               -dname "CN=FeurStagram,OU=Personal,O=Personal,L=ES,S=ES,C=ES"
             mkdir -p artifacts
             base64 feurstagram.keystore > artifacts/keystore_backup.b64
+            echo "generated=true" >> "$GITHUB_OUTPUT"
           else
             echo "$KEYSTORE_B64" | base64 -d > feurstagram.keystore
+            echo "generated=false" >> "$GITHUB_OUTPUT"
           fi
 
           echo "ks_pass=$PASS" >> "$GITHUB_OUTPUT"
@@ -122,7 +124,7 @@ jobs:
 
       # Solo se sube si es un keystore recién generado (primera vez)
       - name: Subir backup de keystore (solo primera vez)
-        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
+        if: steps.ks.outputs.generated == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: keystore-backup-GUARDA-ESTO
