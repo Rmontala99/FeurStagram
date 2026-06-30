@@ -1,0 +1,130 @@
+name: Build FeurStagram APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: 'URL directa del APK de Instagram (.apk). Obtén la URL desde APKMirror: busca Instagram > elige versión > Download APK > copia el enlace del botón de descarga directa.'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Código fuente ───────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Herramientas ────────────────────────────────────────────────────
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Android SDK build-tools (zipalign, apksigner)
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar build-tools 34.0.0
+        run: sdkmanager --install "build-tools;34.0.0"
+
+      - name: Instalar apktool 2.9.3
+        run: |
+          curl -sL "https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar" \
+               -o /usr/local/bin/apktool.jar
+          curl -sL "https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool" \
+               -o /usr/local/bin/apktool
+          chmod +x /usr/local/bin/apktool
+          apktool --version
+
+      # ── 3. Keystore ────────────────────────────────────────────────────────
+      # Primera vez: si no hay secret KEYSTORE_BASE64, genera uno nuevo.
+      # Guarda el archivo artifacts/keystore_backup.b64 como secret para las
+      # siguientes builds (así la APK siempre está firmada con la misma clave
+      # y Android permite instalar actualizaciones sin desinstalar).
+      - name: Preparar keystore
+        id: ks
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+        run: |
+          PASS="${KEYSTORE_PASS:-feurstagram_personal_2024}"
+
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "⚠️  Sin secret KEYSTORE_BASE64 — generando keystore nuevo."
+            echo "    Después de esta build, descarga 'keystore-backup' y guarda su"
+            echo "    contenido como secret KEYSTORE_BASE64 en tu repositorio."
+            keytool -genkeypair -v \
+              -keystore feurstagram.keystore \
+              -alias feurstagram \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PASS" -keypass "$PASS" \
+              -dname "CN=FeurStagram,OU=Personal,O=Personal,L=ES,S=ES,C=ES"
+            mkdir -p artifacts
+            base64 feurstagram.keystore > artifacts/keystore_backup.b64
+          else
+            echo "$KEYSTORE_B64" | base64 -d > feurstagram.keystore
+          fi
+
+          echo "ks_pass=$PASS" >> "$GITHUB_OUTPUT"
+
+      # ── 4. Descargar APK de Instagram ──────────────────────────────────────
+      - name: Descargar APK de Instagram
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          URL="${{ inputs.apk_url }}"
+
+          # Si la URL es de GitHub Releases (mismo repo o privado), usar token
+          if echo "$URL" | grep -q "github.com.*releases/download"; then
+            echo "Descargando desde GitHub Releases..."
+            curl -L --retry 3 --retry-delay 5 \
+                 -H "Authorization: token $GH_TOKEN" \
+                 "$URL" -o instagram.apk
+          else
+            echo "Descargando desde URL externa..."
+            curl -L --retry 3 --retry-delay 5 \
+                 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+                 "$URL" -o instagram.apk
+          fi
+
+          # Verificar que es un APK real (ZIP que empieza con PK)
+          if ! file instagram.apk | grep -qiE "zip|java"; then
+            echo "❌ El archivo descargado no parece un APK válido:"
+            file instagram.apk
+            exit 1
+          fi
+          echo "✅ APK descargado: $(ls -lh instagram.apk | awk '{print $5}')"
+
+      # ── 5. Construir APK ───────────────────────────────────────────────────
+      - name: Construir FeurStagram
+        env:
+          FEURSTAGRAM_KEYSTORE: ${{ github.workspace }}/feurstagram.keystore
+          FEURSTAGRAM_KEYSTORE_PASS: ${{ steps.ks.outputs.ks_pass }}
+        run: |
+          chmod +x patch.sh
+          ./patch.sh instagram.apk
+
+      # ── 6. Subir APK firmada ───────────────────────────────────────────────
+      - name: Subir APK (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: feurstagram-apk
+          path: artifacts/*.apk
+          retention-days: 7
+
+      # Solo se sube si es un keystore recién generado (primera vez)
+      - name: Subir backup de keystore (solo primera vez)
+        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: keystore-backup-GUARDA-ESTO
+          path: artifacts/keystore_backup.b64
+          retention-days: 3
